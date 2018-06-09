@@ -1,8 +1,9 @@
 #define IOT_EDGE
 
-namespace pids18b20
+namespace Modbus.Containers
 {
     using System;
+    using System.Collections.Generic;
     using System.IO;
     using System.Runtime.InteropServices;
     using System.Runtime.Loader;
@@ -12,22 +13,21 @@ namespace pids18b20
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt;
-    using System.Collections.Generic;
     using Microsoft.Azure.Devices.Shared;
     using Newtonsoft.Json;
-    using pids18b20.Sensors;
-
+    using Modbus.Slaves;
 
     class Program
     {
-        static int counter;
-
-        const string Ds18b20s = "DS18B20Configs";
-        const int DefaultPushInterval = 10000;
-
+        const string ModbusSlaves = "SlaveConfigs";
+        const int DefaultPushInterval = 5000;
+        static int m_counter = 0;
         static List<Task> m_task_list = new List<Task>();
         static bool m_run = true;
-        
+        static ModbusPushInterval m_interval = null;
+        static object message_lock = new object();
+        static List<ModbusOutMessage> result = new List<ModbusOutMessage>();
+
         static void Main(string[] args)
         {
 #if IOT_EDGE
@@ -60,7 +60,7 @@ namespace pids18b20
         /// </summary>
         static void InstallCert()
         {
-           // Suppress cert validation on Windows for now
+            // Suppress cert validation on Windows for now
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 return;
@@ -70,13 +70,13 @@ namespace pids18b20
             if (string.IsNullOrWhiteSpace(certPath))
             {
                 // We cannot proceed further without a proper cert file
-                Console.WriteLine($"Missing path to certificate collection file: {certPath}");
+                Console.WriteLine("Missing path to certificate collection file.");
                 throw new InvalidOperationException("Missing path to certificate file.");
             }
             else if (!File.Exists(certPath))
             {
                 // We cannot proceed further without a proper cert file
-                Console.WriteLine($"Missing path to certificate collection file: {certPath}");
+                Console.WriteLine("Missing certificate collection file.");
                 throw new InvalidOperationException("Missing certificate file.");
             }
             X509Store store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
@@ -86,10 +86,8 @@ namespace pids18b20
             store.Close();
         }
 
-
         /// <summary>
-        /// Initializes the DeviceClient and sets up the callback to receive
-        /// messages containing temperature information
+        /// Initializes the Azure IoT Client for the Edge Module
         /// </summary>
         static async Task InitEdgeModule()
         {
@@ -137,8 +135,8 @@ namespace pids18b20
         /// </summary>
         static async Task<MessageResponse> PipeMessage(Message message, object userContext)
         {
-            Console.WriteLine("pids18b20 - Received command");
-            int counterValue = Interlocked.Increment(ref counter);
+            Console.WriteLine("Modbus Writer - Received command");
+            int counterValue = Interlocked.Increment(ref m_counter);
 
             var userContextValues = userContext as Tuple<DeviceClient, Slaves.ModuleHandle>;
             if (userContextValues == null)
@@ -153,22 +151,34 @@ namespace pids18b20
             string messageString = Encoding.UTF8.GetString(messageBytes);
             Console.WriteLine($"Received message: {counterValue}, Body: [{messageString}]");
 
-            if (!string.IsNullOrEmpty(messageString))
+            message.Properties.TryGetValue("command-type", out string cmdType);
+            if (cmdType == "ModbusWrite")
             {
-                var pipeMessage = new Message(messageBytes);
-                foreach (var prop in message.Properties)
+                // Get message body, containing the write target and value
+                var messageBody = JsonConvert.DeserializeObject<ModbusInMessage>(messageString);
+
+                if (messageBody != null)
                 {
-                    pipeMessage.Properties.Add(prop.Key, prop.Value);
+                    Console.WriteLine($"Write device {messageBody.HwId}, " +
+                        $"address: {messageBody.Address}, value: {messageBody.Value}");
+
+                    ModbusSlaveSession target = moduleHandle.GetSlaveSession(messageBody.HwId);
+                    if (target == null)
+                    {
+                        Console.WriteLine($"target \"{messageBody.HwId}\" not found!");
+                    }
+                    else
+                    {
+                        await target.WriteCB(messageBody.UId, messageBody.Address, messageBody.Value);
+                    }
                 }
-                await deviceClient.SendEventAsync("output1", pipeMessage);
-                Console.WriteLine("Received message sent");
             }
             return MessageResponse.Completed;
         }
 
-                /// <summary>ï¿½
-        /// Callback to handle Twin desired properties updatesï¿½
-        /// </summary>ï¿½
+        /// <summary> 
+        /// Callback to handle Twin desired properties updates 
+        /// </summary> 
         static async Task OnDesiredPropertiesUpdate(TwinCollection desiredProperties, object userContext)
         {
             DeviceClient ioTHubModuleClient = userContext as DeviceClient;
@@ -290,7 +300,7 @@ namespace pids18b20
             }
         }
 
-/// <summary>
+        /// <summary>
         /// Iterate through each Modbus session to poll data 
         /// </summary>
         /// <param name="userContext"></param>
@@ -307,7 +317,7 @@ namespace pids18b20
             DeviceClient ioTHubModuleClient = userContextValues.Item1;
             Slaves.ModuleHandle moduleHandle = userContextValues.Item2;
 
-            foreach (SensorInformation s in moduleHandle.ModbusSessionList)
+            foreach (ModbusSlaveSession s in moduleHandle.ModbusSessionList)
             {
                 s.ProcessOperations();
             }
