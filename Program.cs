@@ -21,10 +21,8 @@ namespace pids18b20
     class Program
     {
         static int counter;
-
-        const string Ds18b20s = "DS18B20Configs";
+        const string DesiredPropertyKey = "DS18B20Configs";
         const int DefaultPushInterval = 10000;
-
         static List<Task> m_task_list = new List<Task>();
         static bool m_run = true;
         
@@ -34,7 +32,6 @@ namespace pids18b20
             // Install CA certificate
             InstallCert();
 #endif
-
             // Initialize Edge Module
             InitEdgeModule().Wait();
 
@@ -139,15 +136,16 @@ namespace pids18b20
         {
             Console.WriteLine("pids18b20 - Received command");
             int counterValue = Interlocked.Increment(ref counter);
-
-            var userContextValues = userContext as Tuple<DeviceClient, Slaves.ModuleHandle>;
+            DeviceClient deviceClient = (DeviceClient)userContext;
+            
+            var userContextValues = userContext as Tuple<DeviceClient, Sensors.ModuleConfig>;
             if (userContextValues == null)
             {
                 throw new InvalidOperationException("UserContext doesn't contain " +
                     "expected values");
             }
             DeviceClient ioTHubModuleClient = userContextValues.Item1;
-            Slaves.ModuleHandle moduleHandle = userContextValues.Item2;
+            Sensors.ModuleConfig moduleConfig = userContextValues.Item2;
 
             byte[] messageBytes = message.GetBytes();
             string messageString = Encoding.UTF8.GetString(messageBytes);
@@ -223,7 +221,6 @@ namespace pids18b20
         static async Task UpdateStartFromTwin(TwinCollection desiredProperties, DeviceClient ioTHubModuleClient)
         {
             ModuleConfig config;
-            Slaves.ModuleHandle moduleHandle;
             string jsonStr = null;
             string serializedStr;
 
@@ -231,7 +228,7 @@ namespace pids18b20
             Console.WriteLine("Desired property change:");
             Console.WriteLine(serializedStr);
 
-            if (desiredProperties.Contains(ModbusSlaves))
+            if (desiredProperties.Contains(DesiredPropertyKey))
             {
                 // get config from Twin
                 jsonStr = serializedStr;
@@ -239,12 +236,12 @@ namespace pids18b20
             else
             {
                 Console.WriteLine("No configuration found in desired properties, look in local...");
-                if (File.Exists(@"iot-edge-modbus.json"))
+                if (File.Exists(@"pids18b20.json"))
                 {
                     try
                     {
                         // get config from local file
-                        jsonStr = File.ReadAllText(@"iot-edge-modbus.json");
+                        jsonStr = File.ReadAllText(@"pids18b20.json");
                     }
                     catch (Exception ex)
                     {
@@ -261,43 +258,28 @@ namespace pids18b20
             {
                 Console.WriteLine("Attempt to load configuration: " + jsonStr);
                 config = JsonConvert.DeserializeObject<ModuleConfig>(jsonStr);
-                m_interval = JsonConvert.DeserializeObject<ModbusPushInterval>(jsonStr);
-
-                if (m_interval == null)
+                
+                if (config.IsValid())
                 {
-                    m_interval = new ModbusPushInterval(DefaultPushInterval);
-                }
-
-                if (config.IsValidate())
-                {
-                    moduleHandle = await Slaves.ModuleHandle.CreateHandleFromConfiguration(config);
-
-                    if (moduleHandle != null)
-                    {
-                        var userContext = new Tuple<DeviceClient, Slaves.ModuleHandle>(ioTHubModuleClient, moduleHandle);
+                    var userContext = new Tuple<DeviceClient, Sensors.ModuleConfig>(ioTHubModuleClient, config);
 #if IOT_EDGE
                     // Register callback to be called when a message is received by the module
-                    await ioTHubModuleClient.SetInputMessageHandlerAsync(
-                    "input1",
-                    PipeMessage,
-                    userContext);
+                    await ioTHubModuleClient.SetInputMessageHandlerAsync("input1",PipeMessage,userContext);
 #else
-                        m_task_list.Add(Receive(userContext));
+                    m_task_list.Add(Receive(userContext));
 #endif
-                        m_task_list.Add(Start(userContext));
-                    }
+                    m_task_list.Add(Start(userContext));
+                    
                 }
             }
         }
 
-/// <summary>
-        /// Iterate through each Modbus session to poll data 
+        /// <summary>
+        /// Iterate through each sensor to poll data 
         /// </summary>
-        /// <param name="userContext"></param>
-        /// <returns></returns>
         static async Task Start(object userContext)
         {
-            var userContextValues = userContext as Tuple<DeviceClient, Slaves.ModuleHandle>;
+            var userContextValues = userContext as Tuple<DeviceClient, Sensors.ModuleConfig>;
             if (userContextValues == null)
             {
                 throw new InvalidOperationException("UserContext doesn't contain " +
@@ -305,46 +287,34 @@ namespace pids18b20
             }
 
             DeviceClient ioTHubModuleClient = userContextValues.Item1;
-            Slaves.ModuleHandle moduleHandle = userContextValues.Item2;
-
-            foreach (SensorInformation s in moduleHandle.ModbusSessionList)
-            {
-                s.ProcessOperations();
-            }
+            Sensors.ModuleConfig moduleConfig = userContextValues.Item2;
 
             while (m_run)
             {
-                Message message = null;
-
-                List<object> result = moduleHandle.CollectAndResetOutMessageFromSessions();
-
-                if (result.Count > 0)
+                foreach (string s in moduleConfig.SensorConfigs.Keys)
                 {
-                    ModbusOutMessage out_message = new ModbusOutMessage
+                    SensorConfig sc = moduleConfig.SensorConfigs[s];
+                
+                    SensorReading sensorReading = moduleConfig.ReadSensor(sc);
+                    Message message = null;
+                    message = new Message(Encoding.ASCII.GetBytes(JsonConvert.SerializeObject(sensorReading)));
+                    message.Properties.Add("content-type", "application/edge-ds18b20-json");
+
+                    if (message != null)
                     {
-                        PublishTimestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                        Content = result
-                    };
-
-                    message = new Message(Encoding.ASCII.GetBytes(JsonConvert.SerializeObject(out_message)));
-                    message.Properties.Add("content-type", "application/edge-modbus-json");
-                }
-
-                if (message != null)
-                {
 #if IOT_EDGE
-                    await ioTHubModuleClient.SendEventAsync("modbusOutput", message);
+                        await ioTHubModuleClient.SendEventAsync("sensorOutput", message);
 #else
-                    await ioTHubModuleClient.SendEventAsync(message);
+                        await ioTHubModuleClient.SendEventAsync(message);
 #endif
+                    }
+                    if (!m_run)
+                    {
+                        break;
+                    }
+                    await Task.Delay(1000*moduleConfig.PublishIntervalSeconds);
                 }
-                if (!m_run)
-                {
-                    break;
-                }
-                await Task.Delay(m_interval.PublishInterval);
             }
-            moduleHandle.Release();
         }
 
         /// <summary>
@@ -354,7 +324,7 @@ namespace pids18b20
         /// <returns></returns>
         static async Task Receive(object userContext)
         {
-            var userContextValues = userContext as Tuple<DeviceClient, Slaves.ModuleHandle>;
+            var userContextValues = userContext as Tuple<DeviceClient, Sensors.ModuleConfig>;
             if (userContextValues == null)
             {
                 throw new InvalidOperationException("UserContext doesn't contain " +

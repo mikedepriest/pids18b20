@@ -1,0 +1,31 @@
+
+{
+    "SensorDevicePath":"/sys/bus/w1/devices/",
+    "PublishInterval":300,
+    "SensorConfigs": {
+        "28-0416514b65ff": {
+            "SensorName":"Sensor1",
+            "SensorDescription":"High (AC)",
+            "SensorId":"28-0416514b65ff",
+            "UOM":"F"
+        },
+        "28-041651547eff": {
+            "SensorName":"Sensor2",
+            "SensorDescription":"Desktop",
+            "SensorId":"28-041651547eff",
+            "UOM":"F"
+        },
+        "28-0416510d05ff": {
+            "SensorName":"Sensor3",
+            "SensorDescription":"Floor 1",
+            "SensorId":"28-0416510d05ff",
+            "UOM":"F"
+        },
+        "28-0316459b64ff": {
+            "SensorName":"Sensor4",
+            "SensorDescription":"Floor 2",
+            "SensorId":"28-0316459b64ff",
+            "UOM":"F"
+        }
+    }
+}
