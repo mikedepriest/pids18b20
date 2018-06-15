@@ -1,5 +1,3 @@
-#define IOT_EDGE
-
 namespace pids18b20
 {
     using System;
@@ -28,10 +26,9 @@ namespace pids18b20
         
         static void Main(string[] args)
         {
-#if IOT_EDGE
             // Install CA certificate
             InstallCert();
-#endif
+
             // Initialize Edge Module
             InitEdgeModule().Wait();
 
@@ -92,6 +89,8 @@ namespace pids18b20
         {
             try
             {
+                // START Boilerplate
+
                 // Open a connection to the Edge runtime using MQTT transport and
                 // the connection string provided as an environment variable
                 string connectionString = Environment.GetEnvironmentVariable("EdgeHubConnectionString");
@@ -106,7 +105,10 @@ namespace pids18b20
 
                 DeviceClient ioTHubModuleClient = DeviceClient.CreateFromConnectionString(connectionString, settings);
                 await ioTHubModuleClient.OpenAsync();
-                Console.WriteLine("IoT Hub module client initialized.");
+
+                //END Boilerplate
+
+                Console.WriteLine("IoT Hub module client for pids18b20 initialized.");
 
                 // Read config from Twin and Start
                 Twin moduleTwin = await ioTHubModuleClient.GetTwinAsync();
@@ -173,13 +175,11 @@ namespace pids18b20
 
             try
             {
-#if IOT_EDGE
                 // stop all activities while updating configuration
                 await ioTHubModuleClient.SetInputMessageHandlerAsync(
                 "input1",
                 DummyCallBack,
                 null);
-#endif
 
                 m_run = false;
                 await Task.WhenAll(m_task_list);
@@ -235,7 +235,7 @@ namespace pids18b20
             }
             else
             {
-                Console.WriteLine("No configuration found in desired properties, look in local...");
+                Console.WriteLine("No configuration found in desired properties, look in local pids18b20.json");
                 if (File.Exists(@"pids18b20.json"))
                 {
                     try
@@ -250,7 +250,7 @@ namespace pids18b20
                 }
                 else
                 {
-                    Console.WriteLine("No configuration found in local file.");
+                    Console.WriteLine("No local configuration file found");
                 }
             }
 
@@ -262,14 +262,9 @@ namespace pids18b20
                 if (config.IsValid())
                 {
                     var userContext = new Tuple<DeviceClient, Sensors.ModuleConfig>(ioTHubModuleClient, config);
-#if IOT_EDGE
                     // Register callback to be called when a message is received by the module
                     await ioTHubModuleClient.SetInputMessageHandlerAsync("input1",PipeMessage,userContext);
-#else
-                    m_task_list.Add(Receive(userContext));
-#endif
-                    m_task_list.Add(Start(userContext));
-                    
+                    m_task_list.Add(Start(userContext));                    
                 }
             }
         }
@@ -302,11 +297,7 @@ namespace pids18b20
 
                     if (message != null)
                     {
-#if IOT_EDGE
                         await ioTHubModuleClient.SendEventAsync("sensorOutput", message);
-#else
-                        await ioTHubModuleClient.SendEventAsync(message);
-#endif
                     }
                     if (!m_run)
                     {

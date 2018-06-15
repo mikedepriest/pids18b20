@@ -13,6 +13,7 @@
     static class ModuleConfigDefaults
     {
          public const string DefaultSensorDevicePath = "/sys/bus/w1/devices/";
+         public const string DefaultSensorDevicePathSuffix = "/w1_slave";
          public const int DefaultPublishIntervalSeconds = 60;
          public const string DefaultSensorName = "unnamed";
          public const string DefaultSensorDescription = "no description";
@@ -23,12 +24,6 @@
     /// <summary>
     /// This class contains the configuration for a DS18B20.
     /// </summary>
-//devicedir=/sys/bus/w1/devices/
-//# Sensor symbolic names
-//sensor=High (AC),No Dot,28-0416514b65ff
-//sensor=Desktop,Blue Dot,28-041651547eff
-//sensor=Floor 1,No Dot,28-0416510d05ff
-//sensor=Floor 2,No Dot,28-0316459b64ff
 
     class SensorConfig
     {
@@ -53,20 +48,51 @@
             UOM = ModuleConfigDefaults.DefaultSensorUOM;
         }
 
-        public SensorReading(SensorConfig sc)
+        public SensorReading(string devicePath, string devicePathSuffix, SensorConfig sc)
         {
             PublishTimestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             SensorName = string.IsNullOrEmpty(sc.SensorName) ? ModuleConfigDefaults.DefaultSensorName : sc.SensorName;
             UOM = string.IsNullOrEmpty(sc.UOM) ? ModuleConfigDefaults.DefaultSensorUOM : sc.UOM;
             Temperature = -9999;
-        }
 
+            string sensorfile = devicePath + sc.SensorId + devicePathSuffix;
+            bool deviceReadOk = false;
+
+            // Open the sensor file 
+            string[] lines = {"NO","READING=-9999"};
+            try 
+            {
+                lines = System.IO.File.ReadAllLines(sensorfile);
+                deviceReadOk = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Unable to read device file "+sensorfile+": "+ex.Message);
+            }
+
+            if (deviceReadOk)
+            {
+                // DS18B20 device files have the following structure:
+                // Line 1: Status
+                // Line 2: Reading
+                // Status will be YES if the reading is valid, if it's not YES then we should report an error
+                // Reading takes the form of string=number, where number is the Celcius temperature in thousandths of a degree
+
+                if (lines[0].Contains("YES"))
+                {
+                    string[] readingString = lines[1].Split('=');
+                    float readingC1000 = Convert.ToSingle(readingString[1]);
+                    Temperature = readingC1000 / (float) 1000.0;
+                }
+            }
+        }
     }
 
     
     class ModuleConfig
     {
         public string SensorDevicePath = ModuleConfigDefaults.DefaultSensorDevicePath;
+        public string SensorDevicePathSuffix = ModuleConfigDefaults.DefaultSensorDevicePathSuffix;
         public int PublishIntervalSeconds = ModuleConfigDefaults.DefaultPublishIntervalSeconds; 
         public Dictionary<string, SensorConfig> SensorConfigs;
         public ModuleConfig(string sensorDevicePath, int publishIntervalSeconds, Dictionary<string, SensorConfig> sensors)
@@ -101,7 +127,7 @@
         }
         
         public SensorReading ReadSensor(SensorConfig sc) {
-            SensorReading ret = new SensorReading(sc);
+            SensorReading ret = new SensorReading(this.SensorDevicePath, this.SensorDevicePathSuffix, sc);
             return ret;
         }   
     }

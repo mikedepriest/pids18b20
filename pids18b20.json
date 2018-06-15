@@ -1,6 +1,7 @@
 
 {
     "SensorDevicePath":"/sys/bus/w1/devices/",
+    "SensorDevicePathSuffix":"/w1_slave",
     "PublishInterval":300,
     "SensorConfigs": {
         "28-0416514b65ff": {
