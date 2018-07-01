@@ -1,0 +1,5 @@
+{
+    "routes":{
+        "sensorToIoTHub":"FROM /messages/modules/pids18b20/outputs/pids18b20Output INTO $upstream"
+    }
+}

@@ -2,7 +2,7 @@
 {
     "SensorDevicePath":"/sys/bus/w1/devices/",
     "SensorDevicePathSuffix":"/w1_slave",
-    "PublishInterval":300,
+    "PublishIntervalSeconds":300,
     "SensorConfigs": {
         "28-0416514b65ff": {
             "SensorName":"Sensor1",
@@ -28,5 +28,6 @@
             "SensorId":"28-0316459b64ff",
             "UOM":"F"
         }
-    }
+    },
+    "VerboseLogging":"true"
 }

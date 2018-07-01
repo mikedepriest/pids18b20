@@ -4,7 +4,7 @@ RUN mkdir -p /root/src/app
 WORKDIR /root/src/app 
 COPY . pids18b20 
 WORKDIR /root/src/app/pids18b20
-RUN dotnet restore  --verbosity diag ./pids18b20.csproj
+RUN dotnet restore   ./pids18b20.csproj
 RUN dotnet publish -c release -o published -r linux-arm 
 
 FROM microsoft/dotnet:2.0.0-runtime-stretch-arm32v7 

@@ -19,7 +19,7 @@ namespace pids18b20
     class Program
     {
         static int counter;
-        const string DesiredPropertyKey = "DS18B20Configs";
+        const string DesiredPropertyKey = "SensorConfigs";
         const int DefaultPushInterval = 10000;
         static List<Task> m_task_list = new List<Task>();
         static bool m_run = true;
@@ -227,6 +227,8 @@ namespace pids18b20
             serializedStr = JsonConvert.SerializeObject(desiredProperties);
             Console.WriteLine("Desired property change:");
             Console.WriteLine(serializedStr);
+            Console.WriteLine("Object version:");
+            Console.WriteLine(desiredProperties);
 
             if (desiredProperties.Contains(DesiredPropertyKey))
             {
@@ -261,10 +263,15 @@ namespace pids18b20
                 
                 if (config.IsValid())
                 {
+                    if (config.VerboseLogging) Console.WriteLine("Valid Configuration:\n"+config);
                     var userContext = new Tuple<DeviceClient, Sensors.ModuleConfig>(ioTHubModuleClient, config);
                     // Register callback to be called when a message is received by the module
                     await ioTHubModuleClient.SetInputMessageHandlerAsync("input1",PipeMessage,userContext);
                     m_task_list.Add(Start(userContext));                    
+                }
+                else
+                {
+                   Console.WriteLine("Invalid configuration: " + jsonStr); 
                 }
             }
         }
@@ -289,22 +296,26 @@ namespace pids18b20
                 foreach (string s in moduleConfig.SensorConfigs.Keys)
                 {
                     SensorConfig sc = moduleConfig.SensorConfigs[s];
-                
-                    SensorReading sensorReading = moduleConfig.ReadSensor(sc);
+                    if (moduleConfig.VerboseLogging) Console.WriteLine("Attempting to read sensor: "+sc);
+                    SensorReading sensorReading = moduleConfig.ReadSensor(sc.SensorId);
+                    if (moduleConfig.VerboseLogging) Console.WriteLine("SensorReading:"+sensorReading);
                     Message message = null;
-                    message = new Message(Encoding.ASCII.GetBytes(JsonConvert.SerializeObject(sensorReading)));
-                    message.Properties.Add("content-type", "application/edge-ds18b20-json");
+                    message = new Message(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(sensorReading)));
+                    message.Properties.Add("content-type", "application/edge-pids18b20-json");
+                    message.ContentEncoding = "utf-8"; 
+                    if (moduleConfig.VerboseLogging) Console.Write("Sending message: "+message.BodyStream);
 
                     if (message != null)
                     {
-                        await ioTHubModuleClient.SendEventAsync("sensorOutput", message);
+                        await ioTHubModuleClient.SendEventAsync("pds18b20Output", message);
                     }
                     if (!m_run)
                     {
                         break;
                     }
-                    await Task.Delay(1000*moduleConfig.PublishIntervalSeconds);
                 }
+            
+                await Task.Delay(1000*moduleConfig.PublishIntervalSeconds);
             }
         }
 
@@ -318,8 +329,7 @@ namespace pids18b20
             var userContextValues = userContext as Tuple<DeviceClient, Sensors.ModuleConfig>;
             if (userContextValues == null)
             {
-                throw new InvalidOperationException("UserContext doesn't contain " +
-                    "expected values");
+                throw new InvalidOperationException("UserContext doesn't contain expected values");
             }
             DeviceClient ioTHubModuleClient = userContextValues.Item1;
             var timeout = TimeSpan.FromSeconds(3);
